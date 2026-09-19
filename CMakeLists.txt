@@ -239,6 +239,26 @@ if(HAS_MISSING_TEMPLATE_ARG_LIST_WARNING)
     add_definitions("-Wno-missing-template-arg-list-after-template-kw")
 endif()
 
+# kaguya's native_function.hpp uses uint8_t without including <cstdint>. It
+# compiled while the standard library headers it does include pulled that one
+# in transitively; GCC 13 and newer no longer do, so the build fails with
+# "'uint8_t' does not name a type" and a cascade of template-body errors behind
+# it. Forced rather than patched, because kaguya is a submodule pinned at an
+# upstream revision. Drop this once kaguya includes <cstdint> itself.
+#
+# Consumed per target, by the ones that compile kaguya headers -- every
+# project-wide form reaches a C compilation, and forcing a C++ header there is
+# a hard error, since this tree builds C as well (tinyspline at -std=c89):
+# "'cstdint' file not found" on GCC and Clang, STL1003 "Unexpected compiler,
+# expected C++ compiler" on MSVC. Neither a $<COMPILE_LANGUAGE:CXX> genex nor
+# CMAKE_CXX_FLAGS scopes to C++ under the Visual Studio generators, which put
+# both at project level in a .vcxproj that mixes .c and .cpp.
+if(MSVC)
+    set(LIBDXFRW_KAGUYA_CSTDINT /FIcstdint)
+else()
+    set(LIBDXFRW_KAGUYA_CSTDINT -include cstdint)
+endif()
+
 # Lua 5.5 removed LUA_GCSETPAUSE and LUA_GCSETSTEPMUL in favour of the
 # parameterised LUA_GCPARAM.  kaguya still uses the old names, in exactly two
 # places (State::steppause and State::setstepmul in state.hpp) and nowhere
