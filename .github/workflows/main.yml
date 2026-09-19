@@ -79,8 +79,15 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
-          arch: win64_msvc2019_64
-          modules: 'qttools qtsvg'
+          # win64_msvc2019_64 exists only up to Qt 6.7.3; 6.8 and later ship
+          # win64_msvc2022_64, so this step could never find a package --
+          # aqtinstall reports even qt_base as missing.
+          arch: win64_msvc2022_64
+          # And no modules line. In Qt 6 the essentials -- qtsvg and qttools
+          # among them -- ship inside the base package, and are not add-on
+          # modules aqtinstall can be asked for separately:
+          #   ERROR: The packages ['qtsvg', 'qttools'] were not found while
+          #   parsing XML of package information!
 
       - name: Configure Qt 6
         shell: pwsh
