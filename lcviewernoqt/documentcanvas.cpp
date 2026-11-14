@@ -37,82 +37,18 @@
 #include <cad/meta/metalinewidth.h>
 
 #include <cad/const.h>
+#include <cad/math/floatingpoint.h>
 #include <cmath>
-#include <limits>
 
 #include <typeinfo>
 
 using namespace lc;
 using namespace lc::viewer;
 
-namespace {
-
-constexpr int FLOATING_POINT_COMPARISON_ULPS = 4;
-
-enum class FloatingSign {
-    Negative,
-    Zero,
-    Positive,
-    NonFinite
-};
-
-FloatingSign signWithinUlpsOfZero(double value) {
-    const int category = std::fpclassify(value);
-    if (category == FP_NAN || category == FP_INFINITE) {
-        return FloatingSign::NonFinite;
-    }
-
-    double zeroTolerance = 0.;
-    for (int ulp = 0; ulp < FLOATING_POINT_COMPARISON_ULPS; ++ulp) {
-        zeroTolerance = std::nextafter(zeroTolerance, std::numeric_limits<double>::infinity());
-    }
-    if (std::fabs(value) <= zeroTolerance) {
-        return FloatingSign::Zero;
-    }
-
-    return std::signbit(value) ? FloatingSign::Negative : FloatingSign::Positive;
-}
-
-int compareWithinUlps(double value, double boundary) {
-    const int valueCategory = std::fpclassify(value);
-    const int boundaryCategory = std::fpclassify(boundary);
-    if (valueCategory == FP_NAN || boundaryCategory == FP_NAN) {
-        return 0;
-    }
-
-    if (valueCategory == FP_INFINITE || boundaryCategory == FP_INFINITE) {
-        if (valueCategory == FP_INFINITE && boundaryCategory == FP_INFINITE) {
-            if (std::signbit(value) == std::signbit(boundary)) {
-                return 0;
-            }
-            return std::signbit(value) ? -1 : 1;
-        }
-        if (valueCategory == FP_INFINITE) {
-            return std::signbit(value) ? -1 : 1;
-        }
-        return std::signbit(boundary) ? 1 : -1;
-    }
-
-    double lower = boundary;
-    double upper = boundary;
-    const double negativeInfinity = -std::numeric_limits<double>::infinity();
-    const double positiveInfinity = std::numeric_limits<double>::infinity();
-    for (int ulp = 0; ulp < FLOATING_POINT_COMPARISON_ULPS; ++ulp) {
-        lower = std::nextafter(lower, negativeInfinity);
-        upper = std::nextafter(upper, positiveInfinity);
-    }
-
-    if (value < lower) {
-        return -1;
-    }
-    if (value > upper) {
-        return 1;
-    }
-    return 0;
-}
-
-} // namespace
-
+using lc::maths::FloatingOrder;
+using lc::maths::FloatingSign;
+using lc::maths::compareWithinUlps;
+using lc::maths::signWithinUlpsOfZero;
 
 DocumentCanvas::DocumentCanvas(const std::shared_ptr<lc::storage::Document>& document, std::function<void(double*, double*)> deviceToUser, meta::Block_CSPtr viewport) :
     _document(document),
@@ -249,27 +185,23 @@ void DocumentCanvas::zoom(LcPainter& painter, double factor, bool relativezoom,
     // Convert the requested zoom to a finite absolute scale before touching
     // the transform. ULP-aware comparisons clamp relative zooms before their
     // multiplication can overflow.
-    double targetScale = factor;
-    if (relativezoom) {
-        const double minFactor = _zoomMin / currentScale;
-        const double maxFactor = _zoomMax / currentScale;
-        if (compareWithinUlps(factor, minFactor) <= 0) {
-            targetScale = _zoomMin;
-        }
-        else if (compareWithinUlps(factor, maxFactor) >= 0) {
-            targetScale = _zoomMax;
-        }
-        else {
-            targetScale = factor * currentScale;
-        }
+    const double minFactor = relativezoom ? _zoomMin / currentScale : _zoomMin;
+    const double maxFactor = relativezoom ? _zoomMax / currentScale : _zoomMax;
+    const auto lower = compareWithinUlps(factor, minFactor);
+    const auto upper = compareWithinUlps(factor, maxFactor);
+    if (lower == FloatingOrder::Unordered || upper == FloatingOrder::Unordered) {
+        return;
+    }
+
+    double targetScale;
+    if (lower != FloatingOrder::Greater) {
+        targetScale = _zoomMin;
+    }
+    else if (upper != FloatingOrder::Less) {
+        targetScale = _zoomMax;
     }
     else {
-        if (compareWithinUlps(factor, _zoomMin) <= 0) {
-            targetScale = _zoomMin;
-        }
-        else if (compareWithinUlps(factor, _zoomMax) >= 0) {
-            targetScale = _zoomMax;
-        }
+        targetScale = relativezoom ? factor * currentScale : factor;
     }
 
     if (signWithinUlpsOfZero(targetScale) != FloatingSign::Positive ||
